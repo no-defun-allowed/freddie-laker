@@ -17,8 +17,7 @@
                (sleep n)
                (setf n (* n 2)))
              (:no-error (&rest r)
-               (declare (ignore r))
-               (return)))))
+               (return (values-list r))))))
 (defmacro with-exponential-backoff (() &body body)
   `(call-with-exponential-backoff (lambda () ,@body)))
 

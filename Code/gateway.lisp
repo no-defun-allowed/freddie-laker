@@ -99,7 +99,10 @@
   (%send bot 1 (last-sequence (connection-state bot))))
     
 ;;; Receiving messages
-(defgeneric handle-message-by-op (bot op data type))
+(defgeneric handle-message-by-op (bot op data type)
+  (:method (bot op data type)
+    (warn "Unknown opcode ~d sent to ~s" bot op)))
+
 (defvar *type-handlers* (make-hash-table :test 'equal))
 (defmacro define-type-handler (name (bot data) &body body)
   `(setf (gethash ,(string-upcase name) *type-handlers*)
@@ -132,6 +135,9 @@
                               (return-from out))))
         (unless (null handler)
           (funcall handler bot data))))))
+
+(defmethod handle-message-by-op (bot (reconnect (eql 7)) data type)
+  (reconnect bot :because "Discord asked us to reconnect."))
 
 (defmethod handle-message-by-op (bot (invalid-session (eql 9)) data type)
   (reconnect bot :because "Session invalidated by Discord."))

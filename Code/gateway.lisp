@@ -55,7 +55,7 @@
 (defun disconnect (bot old-connection)
   (bt:with-lock-held ((connection-lock bot))
     ;; Avoid spuriously disconnecting the wrong connection.
-    (when (eq connection old-connection)
+    (when (eq (connection bot) old-connection)
       (wsd:close-connection (connection bot))
       (send-actor (heartbeat-actor bot) :stop))))
 
@@ -143,10 +143,10 @@
           (funcall handler bot data))))))
 
 (defmethod handle-message-by-op (bot (reconnect (eql 7)) data type)
-  (reconnect bot :because "Discord asked us to reconnect."))
+  (reconnect bot (connection bot) :because "Discord asked us to reconnect."))
 
 (defmethod handle-message-by-op (bot (invalid-session (eql 9)) data type)
-  (reconnect bot :because "Session invalidated by Discord."))
+  (reconnect bot (connection bot) :because "Session invalidated by Discord."))
 
 (defmethod handle-message-by-op (bot (hello (eql 10)) data type)
   (setf (heartbeat-interval (connection-state bot)) (jsown:val data "heartbeat_interval"))

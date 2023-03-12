@@ -10,7 +10,7 @@
   ((token :initarg :token :reader token)
    (on-message :initform #'print :initarg :on-message :reader on-message)
    (connection-state :accessor connection-state)
-   (connection :accessor connection)
+   (connection :initform nil :accessor connection)
    (connection-lock :initform (bt:make-lock "Connection lock") :reader connection-lock)
    (heartbeat-actor :accessor heartbeat-actor)
    (watchdog-actor :accessor watchdog-actor)

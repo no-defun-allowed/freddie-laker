@@ -36,31 +36,33 @@
 
 (defun connect (bot)
   (bt:with-lock-held ((connection-lock bot))
-    (with-exponential-backoff ()
-      (let ((client (wsd:make-client (gateway-url))))
-        (setf (connection bot) client
-              (connection-state bot) (make-instance 'connection-state))
-        (wsd:on :message client
-                (lambda (m) (handle-message bot m)))
-        (wsd:on :close client
-                (lambda (&key code reason)
-                  (handle-close bot code reason)))
-        (wsd:start-connection client)
-        (send-actor (watchdog-actor bot) :start)))))
+    ;; Don't try to make another connection if someone else did.
+    (when (null (connection bot))
+      (with-exponential-backoff ()
+        (let ((client (wsd:make-client (gateway-url))))
+          (setf (connection bot) client
+                (connection-state bot) (make-instance 'connection-state))
+          (wsd:on :message client
+                  (lambda (m) (handle-message bot m)))
+          (wsd:on :close client
+                  (lambda (&key code reason)
+                    (handle-close bot code reason)))
+          (wsd:start-connection client)
+          (send-actor (watchdog-actor bot) :start))))))
 
 (defun stop (bot)
   (setf (running-p bot) nil)
-  (disconnect bot (connection bot)))
+  (disconnect bot))
 
-(defun disconnect (bot old-connection)
+(defun disconnect (bot)
   (bt:with-lock-held ((connection-lock bot))
-    ;; Avoid spuriously disconnecting the wrong connection.
-    (when (eq (connection bot) old-connection)
-      (wsd:close-connection (connection bot))
-      (send-actor (heartbeat-actor bot) :stop))))
+    (wsd:close-connection (connection bot))
+    (send-actor (heartbeat-actor bot) :stop)))
 
 (defun handle-close (bot code reason)
-  (send-actor (heartbeat-actor bot) :stop)
+  (bt:with-lock-held ((connection-lock bot))
+    (send-actor (heartbeat-actor bot) :stop)
+    (setf (connection bot) nil))
   (when (running-p bot)
     (format *debug-io* "~a disconnected with code=~s reason=~s~%"
             bot code reason)
@@ -69,10 +71,10 @@
                   (sleep 10)
                   (connect bot)))))
     
-(defun reconnect (bot old-connection &key because)
+(defun reconnect (bot &key because)
   (format *debug-io* "~a Reconnecting ~a.~%"
           because bot)
-  (disconnect bot old-connection))
+  (disconnect bot))
 
 ;;; IO basics
 (defun %send (bot opcode data)
@@ -124,7 +126,6 @@
                           (jsown:val text "t"))))
 
 (define-type-handler ready (bot d)
-  (declare (ignore d))
   (send-actor (watchdog-actor bot) :ok)
   (setf (finished-handshake-p (connection-state bot)) t
         (user-id bot) (jsown:val (jsown:val d "user") "id")))
@@ -143,10 +144,10 @@
           (funcall handler bot data))))))
 
 (defmethod handle-message-by-op (bot (reconnect (eql 7)) data type)
-  (reconnect bot (connection bot) :because "Discord asked us to reconnect."))
+  (reconnect bot :because "Discord asked us to reconnect."))
 
 (defmethod handle-message-by-op (bot (invalid-session (eql 9)) data type)
-  (reconnect bot (connection bot) :because "Session invalidated by Discord."))
+  (reconnect bot :because "Session invalidated by Discord."))
 
 (defmethod handle-message-by-op (bot (hello (eql 10)) data type)
   (setf (heartbeat-interval (connection-state bot)) (jsown:val data "heartbeat_interval"))
@@ -159,19 +160,17 @@
 
 ;;; Actor behaviours
 (defun heartbeat-action (actor)
-  (prog (connection)
+  (tagbody
    idle
      (receive (actor)
        ((:start)
-        (setf connection (connection (bot actor)))
         (go heartbeat))
        (otherwise (go idle)))
    heartbeat
      (handler-bind ((error
                       (lambda (e)
                         (trivial-backtrace:print-backtrace e)
-                        (reconnect (bot actor) connection
-                                   :because "Failed to send heartbeat.")
+                        (reconnect (bot actor) :because "Failed to send heartbeat.")
                         (go idle))))
          (heartbeat (bot actor)))
      (let ((cs (connection-state (bot actor))))
@@ -182,18 +181,16 @@
              (setf (received-heartbeat-p cs) nil)
              (go heartbeat))
             (t
-             (reconnect (bot actor) connection
-                        :because "Didn't receive a heartbeat.")
+             (reconnect (bot actor) :because "Didn't receive a heartbeat.")
              (go idle))))
          ((:stop) (go idle))
          (otherwise (go heartbeat))))))
   
 (defun watchdog-action (actor)
-  (prog (connection)
+  (tagbody
    idle
      (receive (actor)
        ((:start)
-        (setf connection (connection (bot actor)))
         (go watchdog))
        (otherwise (go idle)))
    watchdog
@@ -202,8 +199,7 @@
         (write-line "Finished handshaking." *debug-io*)
         (go idle))
        ((nil) ; Timeout expired.
-        (reconnect (bot actor) connection
-                   :because "Didn't finish handshaking."))
+        (reconnect (bot actor) :because "Didn't finish handshaking."))
        (otherwise (go watchdog)))))
 
 (defun defer-action (actor)

@@ -11,7 +11,7 @@
    (on-message :initform #'print :initarg :on-message :reader on-message)
    (connection-state :accessor connection-state)
    (connection :initform nil :accessor connection)
-   (connection-lock :initform (bt:make-lock "Connection lock") :reader connection-lock)
+   (connection-lock :initform (bt:make-recursive-lock "Connection lock") :reader connection-lock)
    (heartbeat-actor :accessor heartbeat-actor)
    (watchdog-actor :accessor watchdog-actor)
    (defer-actor :accessor defer-actor)

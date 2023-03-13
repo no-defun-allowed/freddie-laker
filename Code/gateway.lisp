@@ -35,7 +35,7 @@
     (connect bot)))
 
 (defun connect (bot)
-  (bt:with-lock-held ((connection-lock bot))
+  (bt:with-recursive-lock-held ((connection-lock bot))
     ;; Don't try to make another connection if someone else did.
     (when (null (connection bot))
       (with-exponential-backoff ()
@@ -55,12 +55,14 @@
   (disconnect bot))
 
 (defun disconnect (bot)
-  (bt:with-lock-held ((connection-lock bot))
+  (bt:with-recursive-lock-held ((connection-lock bot))
     (wsd:close-connection (connection bot))
     (send-actor (heartbeat-actor bot) :stop)))
 
+;;; This might be called by DISCONNECT, or it might not. Puts us in an
+;;; awkward place w.r.t locking; I give up and use a recursive lock here.
 (defun handle-close (bot code reason)
-  (bt:with-lock-held ((connection-lock bot))
+  (bt:with-recursive-lock-held ((connection-lock bot))
     (send-actor (heartbeat-actor bot) :stop)
     (setf (connection bot) nil))
   (when (running-p bot)

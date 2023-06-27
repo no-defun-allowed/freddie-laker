@@ -84,7 +84,6 @@
                `(:obj
                   ("op" . ,opcode)
                   ("d" . ,data)))))
-    (write-line text *debug-io*)
     (wsd:send (connection bot) text)))
 (defmacro obj (&body data)
   ``(:obj ,,@(loop for (key value) on data by #'cddr
